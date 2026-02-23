@@ -1,4 +1,4 @@
-# @developers-joyride/encryptor
+# Encryptor Library
 
 Hybrid RSA + AES-256-GCM encryption middleware for Express.js applications. Provides end-to-end encryption for API requests and responses with replay attack protection.
 

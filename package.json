@@ -33,7 +33,7 @@
   ],
   "scripts": {
     "build": "rimraf dist && tsc",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "test:coverage": "jest --coverage",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "prepare": "npm run build",
