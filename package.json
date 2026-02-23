@@ -1,6 +1,6 @@
 {
   "name": "@developers-joyride/encryptor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hybrid RSA + AES-256-GCM encryption middleware for Express.js applications with replay protection",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
