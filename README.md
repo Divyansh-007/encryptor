@@ -1,11 +1,12 @@
 # Encryptor Library
 
-Hybrid RSA + AES-256-GCM encryption middleware for Express.js applications. Provides end-to-end encryption for API requests and responses with replay attack protection.
+Hybrid RSA + AES-256-GCM encryption middleware for **Express.js** and **NestJS** applications. Provides end-to-end encryption for API requests and responses with replay attack protection.
 
 ## Features
 
 - **Hybrid Encryption**: RSA-OAEP for key exchange + AES-256-GCM for payload encryption
-- **Automatic Request/Response Encryption**: Middleware handles encryption transparently
+- **Framework Support**: Works with both Express.js and NestJS
+- **Automatic Request/Response Encryption**: Middleware/Interceptor handles encryption transparently
 - **Replay Attack Protection**: Built-in protection with pluggable storage backends
   - **Memory Store**: In-memory Map (default, no dependencies)
   - **Redis Store**: Redis-based storage for distributed systems
@@ -18,9 +19,192 @@ Hybrid RSA + AES-256-GCM encryption middleware for Express.js applications. Prov
 npm install @developers-joyride/encryptor
 ```
 
-## Quick Start
+## Table of Contents
 
-### 1. Generate RSA Key Pair
+- [Express.js Usage](#expressjs-usage)
+- [NestJS Usage](#nestjs-usage)
+- [Client Setup](#client-setup)
+- [Storage Backends](#storage-backends)
+- [How It Works](#how-it-works)
+- [API Reference](#api-reference)
+
+---
+
+## Express.js Usage
+
+### Quick Start
+
+```typescript
+import express from "express";
+import { createCryptoMiddleware } from "@developers-joyride/encryptor";
+
+const app = express();
+app.use(express.json());
+
+const crypto = createCryptoMiddleware({
+  privateKey: process.env.RSA_PRIVATE_KEY!,
+  replayProtection: true,
+  replayMaxAge: 30000,
+  replayStore: "memory", // or 'redis'
+});
+
+app.use(crypto.middleware());
+
+app.post("/api/users", (req, res) => {
+  const { name, email } = req.body;
+  res.json({ id: 1, name, email });
+});
+
+app.listen(3000);
+```
+
+### With Redis Store
+
+```typescript
+import Redis from "ioredis";
+import { createCryptoMiddleware } from "@developers-joyride/encryptor";
+
+const redis = new Redis();
+
+const crypto = createCryptoMiddleware({
+  privateKey: process.env.RSA_PRIVATE_KEY!,
+  replayStore: "redis",
+  redis: redis,
+  redisKeyPrefix: "myapp:replay:",
+});
+
+app.use(crypto.middleware());
+```
+
+---
+
+## NestJS Usage
+
+### Module Setup
+
+```typescript
+import { Module, NestModule, MiddlewareConsumer } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import {
+  CryptoModule,
+  DecryptionMiddleware,
+  EncryptionInterceptor,
+} from "@developers-joyride/encryptor";
+
+@Module({
+  imports: [
+    CryptoModule.forRoot({
+      privateKey: process.env.RSA_PRIVATE_KEY!,
+      replayProtection: true,
+      replayMaxAge: 30000,
+      replayStore: "memory", // or 'redis'
+    }),
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: EncryptionInterceptor,
+    },
+  ],
+})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(DecryptionMiddleware)
+      .exclude("health", "public/(.*)")
+      .forRoutes("*");
+  }
+}
+```
+
+### Async Configuration
+
+```typescript
+import { ConfigService } from "@nestjs/config";
+
+@Module({
+  imports: [
+    CryptoModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (config: ConfigService) => ({
+        privateKey: config.get("RSA_PRIVATE_KEY")!,
+        replayProtection: true,
+        replayStore: "redis",
+        redis: new Redis(config.get("REDIS_URL")),
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Using Guard Instead of Middleware
+
+If you prefer guards over middleware:
+
+```typescript
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import {
+  CryptoModule,
+  EncryptionGuard,
+  EncryptionInterceptor,
+} from "@developers-joyride/encryptor";
+
+@Module({
+  imports: [CryptoModule.forRoot({ privateKey: "..." })],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: EncryptionGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: EncryptionInterceptor,
+    },
+  ],
+})
+export class AppModule {}
+```
+
+### Skip Encryption Decorator
+
+Use `@SkipEncryption()` to bypass encryption for specific routes:
+
+```typescript
+import { Controller, Get } from "@nestjs/common";
+import { SkipEncryption } from "@developers-joyride/encryptor";
+
+@Controller("api")
+export class ApiController {
+  @Get("health")
+  @SkipEncryption()
+  getHealth() {
+    return { status: "ok" }; // Not encrypted
+  }
+
+  @Get("data")
+  getData() {
+    return { secret: "value" }; // Encrypted
+  }
+}
+
+// Or skip for entire controller
+@SkipEncryption()
+@Controller("public")
+export class PublicController {
+  @Get("info")
+  getInfo() {
+    return { public: true }; // Not encrypted
+  }
+}
+```
+
+---
+
+## Client Setup
+
+### Generate RSA Key Pair
 
 ```bash
 npm run generate-keys
@@ -34,78 +218,7 @@ import { generateKeyPair } from "@developers-joyride/encryptor";
 const { publicKey, privateKey } = generateKeyPair();
 ```
 
-### 2. Server Setup (Express.js)
-
-#### Using Memory Store (Default)
-
-```typescript
-import express from "express";
-import { createCryptoMiddleware } from "@developers-joyride/encryptor";
-
-const app = express();
-app.use(express.json());
-
-const crypto = createCryptoMiddleware({
-  privateKey: process.env.RSA_PRIVATE_KEY!,
-  replayProtection: true, // Enable replay protection (default: true)
-  replayMaxAge: 30000, // Request expiry time in ms (default: 30000)
-  replayStore: "memory", // Use in-memory Map (default)
-});
-
-app.use(crypto.middleware());
-
-app.post("/api/users", (req, res) => {
-  const { name, email } = req.body;
-  res.json({ id: 1, name, email });
-});
-
-app.listen(3000);
-```
-
-#### Using Redis Store
-
-```typescript
-import express from "express";
-import Redis from "ioredis";
-import { createCryptoMiddleware } from "@developers-joyride/encryptor";
-
-const app = express();
-app.use(express.json());
-
-// Create Redis client
-const redis = new Redis({
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-  password: process.env.REDIS_PASSWORD,
-});
-
-const crypto = createCryptoMiddleware({
-  privateKey: process.env.RSA_PRIVATE_KEY!,
-  replayProtection: true,
-  replayMaxAge: 30000,
-  replayStore: "redis", // Use Redis
-  redis: redis, // Pass Redis client
-  redisKeyPrefix: "myapp:replay:", // Optional custom prefix
-});
-
-app.use(crypto.middleware());
-
-app.post("/api/users", (req, res) => {
-  const { name, email } = req.body;
-  res.json({ id: 1, name, email });
-});
-
-// Cleanup on shutdown
-process.on("SIGTERM", async () => {
-  crypto.destroy();
-  await redis.quit();
-  process.exit(0);
-});
-
-app.listen(3000);
-```
-
-### 3. Client Setup
+### Client-Side Encryption
 
 ```typescript
 import { ClientCrypto } from "@developers-joyride/encryptor";
@@ -125,6 +238,7 @@ async function createUser(data: { name: string; email: string }) {
   });
 
   const encryptedResponse = await response.json();
+  // Note: Store aesKey from encryptRequest for decryption
   return client.decryptResponse(encryptedResponse, aesKey);
 }
 
@@ -139,56 +253,55 @@ async function getUser(id: string) {
 }
 ```
 
+---
+
 ## Storage Backends
 
 ### Memory Store (Default)
 
-Best for:
-
-- Single-server deployments
-- Development/testing
-- Applications without Redis infrastructure
+Best for single-server deployments and development:
 
 ```typescript
+// Express
 const crypto = createCryptoMiddleware({
   privateKey: "...",
-  replayStore: "memory", // or omit (default)
+  replayStore: "memory",
+});
+
+// NestJS
+CryptoModule.forRoot({
+  privateKey: "...",
+  replayStore: "memory",
 });
 ```
 
 ### Redis Store
 
-Best for:
-
-- Multi-server/clustered deployments
-- High-availability requirements
-- Shared replay protection across instances
+Best for distributed/clustered deployments:
 
 ```typescript
 import Redis from "ioredis";
 
 const redis = new Redis();
 
+// Express
 const crypto = createCryptoMiddleware({
   privateKey: "...",
   replayStore: "redis",
   redis: redis,
-  redisKeyPrefix: "app:replay:", // Optional, default: 'crypto:replay:'
+  redisKeyPrefix: "app:replay:",
+});
+
+// NestJS
+CryptoModule.forRoot({
+  privateKey: "...",
+  replayStore: "redis",
+  redis: redis,
+  redisKeyPrefix: "app:replay:",
 });
 ```
 
-**Supported Redis Clients:**
-
-- [ioredis](https://github.com/redis/ioredis) (recommended)
-- [node-redis](https://github.com/redis/node-redis)
-- Any client implementing the `RedisClient` interface
-
-```typescript
-interface RedisClient {
-  setnx(key: string, value: string): Promise<number>;
-  expire(key: string, seconds: number): Promise<number>;
-}
-```
+---
 
 ## How It Works
 
@@ -251,36 +364,77 @@ interface RedisClient {
 └─────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## API Reference
 
-### `createCryptoMiddleware(options)`
+### Express.js
 
-Creates a middleware instance.
+#### `createCryptoMiddleware(options)`
 
 ```typescript
 interface MiddlewareOptions {
-  privateKey: string; // RSA private key (PEM format)
-  replayProtection?: boolean; // Enable replay protection (default: true)
-  replayMaxAge?: number; // Request expiry in ms (default: 30000)
-  replayStore?: "memory" | "redis"; // Storage backend (default: 'memory')
-  redis?: RedisClient; // Redis client (required if replayStore is 'redis')
-  redisKeyPrefix?: string; // Redis key prefix (default: 'crypto:replay:')
-  onError?: (error: Error, req: Request) => void; // Error handler
+  privateKey: string;
+  replayProtection?: boolean; // default: true
+  replayMaxAge?: number; // default: 30000
+  replayStore?: "memory" | "redis"; // default: 'memory'
+  redis?: RedisClient;
+  redisKeyPrefix?: string; // default: 'crypto:replay:'
+  onError?: (error: Error, req: Request) => void;
 }
 ```
 
-### `HybridCryptoMiddleware`
+### NestJS
+
+#### `CryptoModule.forRoot(options)`
 
 ```typescript
-class HybridCryptoMiddleware {
-  decryption(): RequestHandler; // Decryption middleware
-  encryption(): RequestHandler; // Encryption middleware
-  middleware(): RequestHandler[]; // Both middlewares combined
-  destroy(): void | Promise<void>; // Cleanup resources
+interface CryptoModuleOptions {
+  privateKey: string;
+  replayProtection?: boolean;
+  replayMaxAge?: number;
+  replayStore?: "memory" | "redis";
+  redis?: RedisClient;
+  redisKeyPrefix?: string;
 }
 ```
 
-### `ClientCrypto`
+#### `CryptoModule.forRootAsync(options)`
+
+```typescript
+interface CryptoModuleAsyncOptions {
+  imports?: any[];
+  useFactory: (...args: any[]) => Promise<CryptoModuleOptions> | CryptoModuleOptions;
+  inject?: any[];
+}
+```
+
+#### Components
+
+| Component               | Type        | Description                          |
+| ----------------------- | ----------- | ------------------------------------ |
+| `DecryptionMiddleware`  | Middleware  | Decrypts incoming requests           |
+| `EncryptionInterceptor` | Interceptor | Encrypts outgoing responses          |
+| `EncryptionGuard`       | Guard       | Alternative to middleware            |
+| `SkipEncryption`        | Decorator   | Bypasses encryption for route/controller |
+
+#### Injection Tokens
+
+```typescript
+import { CRYPTO_SERVICE, REPLAY_STORE, CRYPTO_OPTIONS } from "@developers-joyride/encryptor";
+
+@Injectable()
+export class MyService {
+  constructor(
+    @Inject(CRYPTO_SERVICE) private cryptoService: CryptoService,
+    @Inject(REPLAY_STORE) private replayStore: ReplayStore,
+  ) {}
+}
+```
+
+### Client
+
+#### `ClientCrypto`
 
 ```typescript
 class ClientCrypto {
@@ -288,62 +442,17 @@ class ClientCrypto {
 
   encryptRequest(data: unknown): ClientEncryptionResult;
   encryptGetRequest(): { headers: Record<string, string>; aesKey: Buffer };
-  decryptResponse(
-    input: { payload: string; iv: string },
-    aesKey: Buffer,
-  ): unknown;
+  decryptResponse(input: { payload: string; iv: string }, aesKey: Buffer): unknown;
 }
 ```
 
-### `generateKeyPair()`
-
-Generates a new RSA key pair (2048-bit).
+#### `generateKeyPair()`
 
 ```typescript
 function generateKeyPair(): { publicKey: string; privateKey: string };
 ```
 
-### Storage Classes
-
-```typescript
-// Memory-based replay store
-class MemoryReplayStore implements ReplayStore {
-  constructor(options?: { maxAge?: number; cleanupInterval?: number });
-  validate(params: { requestId?: string; timestamp?: number }): Promise<void>;
-  destroy(): void;
-}
-
-// Redis-based replay store
-class RedisReplayStore implements ReplayStore {
-  constructor(
-    redis: RedisClient,
-    options?: { maxAge?: number; keyPrefix?: string },
-  );
-  validate(params: { requestId?: string; timestamp?: number }): Promise<void>;
-  destroy(): Promise<void>;
-}
-```
-
-## Selective Encryption
-
-To skip encryption for certain routes, apply middleware selectively:
-
-```typescript
-const crypto = createCryptoMiddleware({ privateKey: "..." });
-
-// Apply to specific routes only
-app.use("/api/secure", crypto.middleware());
-
-// Or exclude certain routes
-app.use((req, res, next) => {
-  if (req.path.startsWith("/public")) {
-    return next();
-  }
-  crypto.decryption()(req, res, () => {
-    crypto.encryption()(req, res, next);
-  });
-});
-```
+---
 
 ## Security Considerations
 

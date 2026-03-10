@@ -5,6 +5,21 @@ export { RedisReplayStore, createRedisReplayStore } from './replay-redis.service
 export { HybridCryptoMiddleware, createCryptoMiddleware } from './middleware.js';
 export { ClientCrypto, generateKeyPair } from './client.js';
 
+// NestJS exports
+export {
+  CryptoModule,
+  CRYPTO_SERVICE,
+  REPLAY_STORE,
+  CRYPTO_OPTIONS,
+  type CryptoModuleOptions,
+  type CryptoModuleAsyncOptions,
+  DecryptionMiddleware,
+  EncryptionInterceptor,
+  EncryptionGuard,
+  SkipEncryption,
+  SKIP_ENCRYPTION_KEY,
+} from './nestjs/index.js';
+
 // Type exports
 export type {
   CryptoContext,
